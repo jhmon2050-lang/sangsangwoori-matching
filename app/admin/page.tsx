@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,10 +27,17 @@ type MatchRow = {
 type SeniorStatus = 'unmatched' | 'pending' | 'assigned'
 
 const STATUS_CONFIG: Record<SeniorStatus, { label: string; badgeClass: string; cardClass: string }> = {
-  unmatched: { label: '미매칭',   badgeClass: 'bg-red-100 text-red-800',    cardClass: 'bg-red-50 border-red-200' },
+  unmatched: { label: '미매칭',    badgeClass: 'bg-red-100 text-red-800',       cardClass: 'bg-red-50 border-red-200' },
   pending:   { label: '매칭 대기', badgeClass: 'bg-yellow-100 text-yellow-800', cardClass: 'bg-yellow-50 border-yellow-200' },
-  assigned:  { label: '배정 완료', badgeClass: 'bg-green-100 text-green-800',  cardClass: 'bg-green-50 border-green-200' },
+  assigned:  { label: '배정 완료', badgeClass: 'bg-green-100 text-green-800',   cardClass: 'bg-green-50 border-green-200' },
 }
+
+const FILTER_TABS: { key: SeniorStatus | 'all'; label: string }[] = [
+  { key: 'all',       label: '전체' },
+  { key: 'unmatched', label: '미매칭' },
+  { key: 'pending',   label: '매칭 대기' },
+  { key: 'assigned',  label: '배정 완료' },
+]
 
 function getSeniorStatus(seniorId: string, matches: MatchRow[]): SeniorStatus {
   const own = matches.filter(m => m.senior_id === seniorId)
@@ -42,7 +50,13 @@ function getBestMatch(seniorId: string, matches: MatchRow[]): MatchRow | undefin
   return matches.find(m => m.senior_id === seniorId)
 }
 
-export default async function AdminPage() {
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>
+}) {
+  const { status: filterStatus } = await searchParams
+
   const [{ data: rawSeniors }, { data: rawMatches }] = await Promise.all([
     supabase
       .from('seniors')
@@ -62,6 +76,13 @@ export default async function AdminPage() {
     pending:   seniors.filter(s => getSeniorStatus(s.id, matches) === 'pending').length,
     assigned:  seniors.filter(s => getSeniorStatus(s.id, matches) === 'assigned').length,
   }
+
+  const visibleSeniors =
+    !filterStatus || filterStatus === 'all'
+      ? seniors
+      : seniors.filter(s => getSeniorStatus(s.id, matches) === filterStatus)
+
+  const activeFilter = (filterStatus as SeniorStatus | 'all') ?? 'all'
 
   return (
     <div className="flex flex-col gap-8">
@@ -95,14 +116,39 @@ export default async function AdminPage() {
           <div className="flex items-center justify-between flex-wrap gap-3">
             <CardTitle className="text-2xl">시니어 매칭 현황</CardTitle>
             <Badge className="text-base px-4 py-1 bg-blue-600 text-white">
-              전체 {seniors.length}명
+              {visibleSeniors.length}명 표시 / 전체 {seniors.length}명
             </Badge>
+          </div>
+
+          {/* 상태 필터 탭 */}
+          <div className="flex gap-2 flex-wrap mt-3">
+            {FILTER_TABS.map(tab => {
+              const isActive = activeFilter === tab.key
+              return (
+                <Link
+                  key={tab.key}
+                  href={tab.key === 'all' ? '/admin' : `/admin?status=${tab.key}`}
+                  className={`px-4 py-2 rounded-lg text-base font-semibold transition-colors ${
+                    isActive
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {tab.label}
+                  {tab.key !== 'all' && (
+                    <span className="ml-2 text-sm opacity-80">
+                      {counts[tab.key as SeniorStatus]}
+                    </span>
+                  )}
+                </Link>
+              )
+            })}
           </div>
         </CardHeader>
         <CardContent>
-          {seniors.length === 0 ? (
+          {visibleSeniors.length === 0 ? (
             <p className="text-center text-gray-400 text-xl py-12">
-              등록된 시니어가 없습니다
+              해당 상태의 시니어가 없습니다
             </p>
           ) : (
             <Table>
@@ -114,7 +160,7 @@ export default async function AdminPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {seniors.map(senior => {
+                {visibleSeniors.map(senior => {
                   const status    = getSeniorStatus(senior.id, matches)
                   const bestMatch = getBestMatch(senior.id, matches)
                   const cfg       = STATUS_CONFIG[status]
