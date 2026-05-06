@@ -1,57 +1,68 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { supabase } from '@/lib/supabase'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Table, TableBody, TableCell,
+  TableHead, TableHeader, TableRow,
+} from '@/components/ui/table'
+import { AssignButton } from '@/components/assign-button'
 
-const STATUS_COLUMNS = [
-  {
-    key: "unmatched",
-    label: "미매칭",
-    color: "bg-red-50 border-red-200",
-    badgeColor: "bg-red-100 text-red-800",
-    count: 0,
-  },
-  {
-    key: "pending",
-    label: "매칭 대기",
-    color: "bg-yellow-50 border-yellow-200",
-    badgeColor: "bg-yellow-100 text-yellow-800",
-    count: 0,
-  },
-  {
-    key: "assigned",
-    label: "배정 완료",
-    color: "bg-green-50 border-green-200",
-    badgeColor: "bg-green-100 text-green-800",
-    count: 0,
-  },
-];
+type SeniorRow = {
+  id: string
+  name: string
+  region: string
+  desired_job: string
+  career_years: number
+}
 
-const PLACEHOLDER_SENIORS = [
-  { id: "1", name: "김철수", region: "서울", desired_job: "경비·보안", career_years: 10, status: "unmatched" },
-  { id: "2", name: "이순자", region: "경기", desired_job: "조리·식품", career_years: 5, status: "pending" },
-  { id: "3", name: "박영호", region: "부산", desired_job: "운전·배달", career_years: 15, status: "assigned" },
-];
+type MatchRow = {
+  id: string
+  senior_id: string
+  score: number
+  status: string
+  jobs: { title: string; region: string; job_type: string } | null
+}
 
-const STATUS_LABEL: Record<string, string> = {
-  unmatched: "미매칭",
-  pending: "매칭 대기",
-  assigned: "배정 완료",
-};
+type SeniorStatus = 'unmatched' | 'pending' | 'assigned'
 
-const STATUS_BADGE_COLOR: Record<string, string> = {
-  unmatched: "bg-red-100 text-red-800",
-  pending: "bg-yellow-100 text-yellow-800",
-  assigned: "bg-green-100 text-green-800",
-};
+const STATUS_CONFIG: Record<SeniorStatus, { label: string; badgeClass: string; cardClass: string }> = {
+  unmatched: { label: '미매칭',   badgeClass: 'bg-red-100 text-red-800',    cardClass: 'bg-red-50 border-red-200' },
+  pending:   { label: '매칭 대기', badgeClass: 'bg-yellow-100 text-yellow-800', cardClass: 'bg-yellow-50 border-yellow-200' },
+  assigned:  { label: '배정 완료', badgeClass: 'bg-green-100 text-green-800',  cardClass: 'bg-green-50 border-green-200' },
+}
 
-export default function AdminPage() {
+function getSeniorStatus(seniorId: string, matches: MatchRow[]): SeniorStatus {
+  const own = matches.filter(m => m.senior_id === seniorId)
+  if (own.length === 0) return 'unmatched'
+  if (own.some(m => m.status === 'assigned')) return 'assigned'
+  return 'pending'
+}
+
+function getBestMatch(seniorId: string, matches: MatchRow[]): MatchRow | undefined {
+  return matches.find(m => m.senior_id === seniorId)
+}
+
+export default async function AdminPage() {
+  const [{ data: rawSeniors }, { data: rawMatches }] = await Promise.all([
+    supabase
+      .from('seniors')
+      .select('id, name, region, desired_job, career_years')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('matches')
+      .select('id, senior_id, score, status, jobs(title, region, job_type)')
+      .order('score', { ascending: false }),
+  ])
+
+  const seniors = (rawSeniors ?? []) as SeniorRow[]
+  const matches = (rawMatches ?? []) as unknown as MatchRow[]
+
+  const counts = {
+    unmatched: seniors.filter(s => getSeniorStatus(s.id, matches) === 'unmatched').length,
+    pending:   seniors.filter(s => getSeniorStatus(s.id, matches) === 'pending').length,
+    assigned:  seniors.filter(s => getSeniorStatus(s.id, matches) === 'assigned').length,
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -59,78 +70,83 @@ export default function AdminPage() {
         <p className="text-xl text-gray-600">매칭 현황을 한눈에 확인하세요</p>
       </div>
 
-      {/* 현황 요약 카드 3개 */}
+      {/* 현황 요약 카드 3종 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        {STATUS_COLUMNS.map((col) => (
-          <Card key={col.key} className={`border-2 ${col.color} shadow-sm`}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xl font-semibold text-gray-700">
-                {col.label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-gray-900">
-                  {PLACEHOLDER_SENIORS.filter((s) => s.status === col.key).length}
-                </span>
-                <span className="text-lg text-gray-500">명</span>
-              </div>
-              <span
-                className={`inline-block mt-2 px-2 py-0.5 rounded text-sm font-medium ${col.badgeColor}`}
-              >
-                {col.label} 상태
-              </span>
-            </CardContent>
-          </Card>
-        ))}
+        {(Object.entries(STATUS_CONFIG) as [SeniorStatus, typeof STATUS_CONFIG.unmatched][]).map(
+          ([key, cfg]) => (
+            <Card key={key} className={`border-2 ${cfg.cardClass} shadow-sm`}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xl font-semibold text-gray-700">{cfg.label}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-5xl font-bold text-gray-900">{counts[key]}</span>
+                  <span className="text-lg text-gray-500">명</span>
+                </div>
+              </CardContent>
+            </Card>
+          ),
+        )}
       </div>
 
-      {/* 시니어 목록 테이블 */}
+      {/* 시니어 매칭 현황 테이블 */}
       <Card className="shadow-md">
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <CardTitle className="text-2xl">시니어 매칭 현황</CardTitle>
             <Badge className="text-base px-4 py-1 bg-blue-600 text-white">
-              전체 {PLACEHOLDER_SENIORS.length}명
+              전체 {seniors.length}명
             </Badge>
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-gray-50">
-                <TableHead className="text-lg font-bold text-gray-700">이름</TableHead>
-                <TableHead className="text-lg font-bold text-gray-700">지역</TableHead>
-                <TableHead className="text-lg font-bold text-gray-700">희망 직종</TableHead>
-                <TableHead className="text-lg font-bold text-gray-700">경력</TableHead>
-                <TableHead className="text-lg font-bold text-gray-700">상태</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {PLACEHOLDER_SENIORS.map((senior) => (
-                <TableRow key={senior.id} className="hover:bg-gray-50">
-                  <TableCell className="text-lg font-medium">{senior.name}</TableCell>
-                  <TableCell className="text-lg">{senior.region}</TableCell>
-                  <TableCell className="text-lg">{senior.desired_job}</TableCell>
-                  <TableCell className="text-lg">{senior.career_years}년</TableCell>
-                  <TableCell>
-                    <span
-                      className={`inline-flex px-3 py-1 rounded-full text-base font-semibold ${
-                        STATUS_BADGE_COLOR[senior.status]
-                      }`}
-                    >
-                      {STATUS_LABEL[senior.status]}
-                    </span>
-                  </TableCell>
+          {seniors.length === 0 ? (
+            <p className="text-center text-gray-400 text-xl py-12">
+              등록된 시니어가 없습니다
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gray-50">
+                  {['이름', '지역', '희망 직종', '경력', '추천 일자리', '점수', '상태', ''].map(h => (
+                    <TableHead key={h} className="text-base font-bold text-gray-700">{h}</TableHead>
+                  ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <p className="text-center text-gray-400 text-sm mt-4">
-            * 더미 데이터 — 기능 구현 후 실데이터로 교체됩니다
-          </p>
+              </TableHeader>
+              <TableBody>
+                {seniors.map(senior => {
+                  const status    = getSeniorStatus(senior.id, matches)
+                  const bestMatch = getBestMatch(senior.id, matches)
+                  const cfg       = STATUS_CONFIG[status]
+
+                  return (
+                    <TableRow key={senior.id} className="hover:bg-gray-50">
+                      <TableCell className="text-lg font-medium">{senior.name}</TableCell>
+                      <TableCell className="text-lg">{senior.region}</TableCell>
+                      <TableCell className="text-lg">{senior.desired_job}</TableCell>
+                      <TableCell className="text-lg">{senior.career_years}년</TableCell>
+                      <TableCell className="text-lg">{bestMatch?.jobs?.title ?? '—'}</TableCell>
+                      <TableCell className="text-lg font-semibold">
+                        {bestMatch ? `${bestMatch.score}점` : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex px-3 py-1 rounded-full text-base font-semibold ${cfg.badgeClass}`}>
+                          {cfg.label}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {status === 'pending' && bestMatch && (
+                          <AssignButton matchId={bestMatch.id} />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }
