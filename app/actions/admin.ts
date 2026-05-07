@@ -2,6 +2,7 @@
 
 import { supabase } from '@/lib/supabase'
 import { revalidatePath } from 'next/cache'
+import { normalizeRegion, normalizeJobType } from '@/lib/normalize'
 
 export async function assignMatch(matchId: string) {
   const { error } = await supabase
@@ -35,15 +36,17 @@ export async function addJob(
   if (!job_type) fieldErrors.job_type = '직종을 선택해 주세요.'
   if (Object.keys(fieldErrors).length > 0) return { fieldErrors }
 
+  const normRegion  = normalizeRegion(region)
+  const normJobType = normalizeJobType(job_type)
+
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
-    .insert({ title, region, job_type, required_career: isNaN(required_career) ? 0 : required_career })
+    .insert({ title, region: normRegion, job_type: normJobType, required_career: isNaN(required_career) ? 0 : required_career })
     .select('id')
     .single()
 
   if (jobErr || !job) return { error: `등록 실패: ${jobErr?.message}` }
 
-  // 새 일자리 등록 후 전체 시니어와 자동 매칭 재계산
   const { error: rpcErr } = await supabase.rpc('rematch_job', { p_job_id: job.id })
   if (rpcErr) return { error: `매칭 계산 실패: ${rpcErr.message}` }
 

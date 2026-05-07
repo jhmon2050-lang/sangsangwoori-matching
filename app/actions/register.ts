@@ -1,6 +1,7 @@
 'use server'
 
 import { supabase } from '@/lib/supabase'
+import { normalizeRegion, normalizeJobType } from '@/lib/normalize'
 
 export type RegisterState = {
   fieldErrors?: { name?: string; region?: string; desired_job?: string }
@@ -24,9 +25,12 @@ export async function registerSenior(
   if (!desired_job) fieldErrors.desired_job = '희망 직종을 선택해 주세요.'
   if (Object.keys(fieldErrors).length > 0) return { fieldErrors }
 
+  const normRegion = normalizeRegion(region)
+  const normJob    = normalizeJobType(desired_job)
+
   const { data: senior, error: seniorErr } = await supabase
     .from('seniors')
-    .insert({ name, region, desired_job, career_years: isNaN(career_years) ? 0 : career_years })
+    .insert({ name, region: normRegion, desired_job: normJob, career_years: isNaN(career_years) ? 0 : career_years })
     .select('id')
     .single()
 
