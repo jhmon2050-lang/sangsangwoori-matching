@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import type { Job } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
   Table, TableBody, TableCell,
   TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { AssignButton } from '@/components/assign-button'
+import { JobManagement } from '@/components/job-management'
 
 type SeniorRow = {
   id: string
@@ -17,14 +18,26 @@ type SeniorRow = {
 }
 
 type MatchRow = {
-  id: string
   senior_id: string
   score: number
   status: string
-  jobs: { title: string; region: string; job_type: string } | null
 }
 
 type SeniorStatus = 'unmatched' | 'pending' | 'assigned'
+
+function getSeniorStatus(seniorId: string, matches: MatchRow[]): SeniorStatus {
+  const own = matches.filter(m => m.senior_id === seniorId && m.score > 0)
+  if (own.length === 0) return 'unmatched'
+  if (own.some(m => m.status === 'assigned' || m.status === 'done')) return 'assigned'
+  return 'pending'
+}
+
+function getBestScore(seniorId: string, matches: MatchRow[]): number {
+  const scores = matches
+    .filter(m => m.senior_id === seniorId && m.score > 0)
+    .map(m => m.score)
+  return scores.length > 0 ? Math.max(...scores) : 0
+}
 
 const STATUS_CONFIG: Record<SeniorStatus, { label: string; badgeClass: string; cardClass: string }> = {
   unmatched: { label: '미매칭',    badgeClass: 'bg-red-100 text-red-800',       cardClass: 'bg-red-50 border-red-200' },
@@ -39,15 +52,17 @@ const FILTER_TABS: { key: SeniorStatus | 'all'; label: string }[] = [
   { key: 'assigned',  label: '배정 완료' },
 ]
 
-function getSeniorStatus(seniorId: string, matches: MatchRow[]): SeniorStatus {
-  const own = matches.filter(m => m.senior_id === seniorId)
-  if (own.length === 0) return 'unmatched'
-  if (own.some(m => m.status === 'assigned')) return 'assigned'
-  return 'pending'
-}
-
-function getBestMatch(seniorId: string, matches: MatchRow[]): MatchRow | undefined {
-  return matches.find(m => m.senior_id === seniorId)
+function ScoreBadge({ score }: { score: number }) {
+  if (score === 0) return <span className="text-gray-400 text-base">—</span>
+  const cls =
+    score >= 6 ? 'bg-yellow-100 text-yellow-800 border-yellow-400' :
+    score >= 4 ? 'bg-green-100 text-green-800 border-green-400' :
+                 'bg-gray-100 text-gray-600 border-gray-300'
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-base font-bold border ${cls}`}>
+      {score >= 6 ? '★ ' : ''}{score}점
+    </span>
+  )
 }
 
 export default async function AdminPage({
@@ -57,19 +72,23 @@ export default async function AdminPage({
 }) {
   const { status: filterStatus } = await searchParams
 
-  const [{ data: rawSeniors }, { data: rawMatches }] = await Promise.all([
+  const [{ data: rawSeniors }, { data: rawMatches }, { data: rawJobs }] = await Promise.all([
     supabase
       .from('seniors')
       .select('id, name, region, desired_job, career_years')
       .order('created_at', { ascending: false }),
     supabase
       .from('matches')
-      .select('id, senior_id, score, status, jobs(title, region, job_type)')
-      .order('score', { ascending: false }),
+      .select('senior_id, score, status'),
+    supabase
+      .from('jobs')
+      .select('id, title, region, job_type, required_career')
+      .order('created_at', { ascending: false }),
   ])
 
   const seniors = (rawSeniors ?? []) as SeniorRow[]
-  const matches = (rawMatches ?? []) as unknown as MatchRow[]
+  const matches = (rawMatches ?? []) as MatchRow[]
+  const jobs    = (rawJobs    ?? []) as Job[]
 
   const counts = {
     unmatched: seniors.filter(s => getSeniorStatus(s.id, matches) === 'unmatched').length,
@@ -91,7 +110,7 @@ export default async function AdminPage({
         <p className="text-xl text-gray-600">매칭 현황을 한눈에 확인하세요</p>
       </div>
 
-      {/* 현황 요약 카드 3종 */}
+      {/* 집계 카드 3종 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         {(Object.entries(STATUS_CONFIG) as [SeniorStatus, typeof STATUS_CONFIG.unmatched][]).map(
           ([key, cfg]) => (
@@ -110,7 +129,7 @@ export default async function AdminPage({
         )}
       </div>
 
-      {/* 시니어 매칭 현황 테이블 */}
+      {/* 시니어 목록 테이블 */}
       <Card className="shadow-md">
         <CardHeader>
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -120,7 +139,6 @@ export default async function AdminPage({
             </Badge>
           </div>
 
-          {/* 상태 필터 탭 */}
           <div className="flex gap-2 flex-wrap mt-3">
             {FILTER_TABS.map(tab => {
               const isActive = activeFilter === tab.key
@@ -154,7 +172,7 @@ export default async function AdminPage({
             <Table>
               <TableHeader>
                 <TableRow className="bg-gray-50">
-                  {['이름', '지역', '희망 직종', '경력', '추천 일자리', '점수', '상태', ''].map(h => (
+                  {['이름', '지역', '희망 직종', '경력', '최고 점수', '상태', ''].map(h => (
                     <TableHead key={h} className="text-base font-bold text-gray-700">{h}</TableHead>
                   ))}
                 </TableRow>
@@ -162,7 +180,7 @@ export default async function AdminPage({
               <TableBody>
                 {visibleSeniors.map(senior => {
                   const status    = getSeniorStatus(senior.id, matches)
-                  const bestMatch = getBestMatch(senior.id, matches)
+                  const bestScore = getBestScore(senior.id, matches)
                   const cfg       = STATUS_CONFIG[status]
 
                   return (
@@ -171,19 +189,19 @@ export default async function AdminPage({
                       <TableCell className="text-lg">{senior.region}</TableCell>
                       <TableCell className="text-lg">{senior.desired_job}</TableCell>
                       <TableCell className="text-lg">{senior.career_years}년</TableCell>
-                      <TableCell className="text-lg">{bestMatch?.jobs?.title ?? '—'}</TableCell>
-                      <TableCell className="text-lg font-semibold">
-                        {bestMatch ? `${bestMatch.score}점` : '—'}
-                      </TableCell>
+                      <TableCell><ScoreBadge score={bestScore} /></TableCell>
                       <TableCell>
                         <span className={`inline-flex px-3 py-1 rounded-full text-base font-semibold ${cfg.badgeClass}`}>
                           {cfg.label}
                         </span>
                       </TableCell>
                       <TableCell>
-                        {status === 'pending' && bestMatch && (
-                          <AssignButton matchId={bestMatch.id} />
-                        )}
+                        <Link
+                          href={`/recommendations?senior_id=${senior.id}`}
+                          className="inline-flex items-center justify-center px-4 py-2 rounded-lg text-base font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+                        >
+                          상세 보기
+                        </Link>
                       </TableCell>
                     </TableRow>
                   )
@@ -193,6 +211,9 @@ export default async function AdminPage({
           )}
         </CardContent>
       </Card>
+
+      {/* 일자리 관리 섹션 */}
+      <JobManagement jobs={jobs} />
     </div>
   )
 }
