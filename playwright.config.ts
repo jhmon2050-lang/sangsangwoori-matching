@@ -18,7 +18,7 @@ try {
 } catch { /* .env.local 없으면 CI 환경변수 사용 */ }
 
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: './tests',
   timeout: 30_000,
   retries: 0,
   // 단일 워커로 직렬 실행 — beforeEach DB 리셋 시 충돌 방지

@@ -34,7 +34,6 @@ type JobInput = {
 
 /** 테스트 전 DB를 깨끗한 상태로 초기화 */
 export async function resetDB(): Promise<void> {
-  // CASCADE 대신 명시적 순서로 삭제
   await db.from('matches').delete().not('id', 'is', null)
   await db.from('seniors').delete().not('id', 'is', null)
   await db.from('jobs').delete().not('id', 'is', null)

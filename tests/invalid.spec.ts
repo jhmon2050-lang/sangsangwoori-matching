@@ -17,7 +17,6 @@ test('필수 필드(이름) 누락 → 빨간 에러 박스 + DB 저장 차단',
 
   // ── 2. 이름 빈 채로 제출 ─────────────────────────────────────────
   await page.goto('/register')
-  // 이름은 의도적으로 입력하지 않음
 
   await page.click('text=지역을 선택하세요')
   await page.click('[role="option"]:has-text("서울")')

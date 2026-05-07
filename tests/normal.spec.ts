@@ -35,7 +35,6 @@ test('정상 등록 → 성공 박스 → 6점 금색 배지 추천 카드', asy
 
   // ── 4. 추천 목록 — 6점 금색 배지 카드가 최상단 ───────────────────
   await page.goto(`/recommendations?senior_id=${seniorId}`)
-  // 6점 배지: ScoreBadge 가 bg-yellow-100 클래스 + "6점" 텍스트 렌더링
   const goldBadge = page.locator('.bg-yellow-100').first()
   await expect(goldBadge).toBeVisible({ timeout: 10_000 })
   await expect(goldBadge).toContainText('6점')
